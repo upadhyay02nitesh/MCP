@@ -1,114 +1,141 @@
-Got it 👍 You want a cleaner, more refined Streamlit app for your Media Content Summarization Agent.
-Let’s make it structured, user-friendly, and flexible.
+Got it 👍 You want three modes in your Streamlit app now:
+
+1. 🎙️ Audio/Video Upload → Azure Whisper → Summarization
+
+
+2. 📰 News URL → Extract → Summarization
+
+
+3. ✍️ Blog/Text Paste → Summarization
+
+
+
+I’ll refine the Streamlit code with this third option 👇
 
 
 ---
 
-🎯 Features in Refined Version
-
-Nice UI layout with sections.
-
-User can choose input type: Audio/Video OR News URL.
-
-Select summary style: TL;DR, Bullet Points, Detailed.
-
-Summaries displayed in a formatted output.
-
-Efficient handling (store temp files, chunk text if large).
-
-
-
----
-
-🐍 Refined Streamlit Code
+🐍 Streamlit: Media, URL & Blog Summarization Agent
 
 import streamlit as st
-import whisper
-import requests
-from bs4 import BeautifulSoup
-from langchain.chat_models import ChatOpenAI
+import openai
+from langchain_community.document_loaders import UnstructuredURLLoader
+from langchain_openai import AzureChatOpenAI
 from langchain.chains.summarize import load_summarize_chain
 from langchain.docstore.document import Document
+import os
+
+# ------------------ Azure Config ------------------
+openai.api_type = "azure"
+openai.api_key = os.getenv("AZURE_OPENAI_KEY")
+openai.api_base = "https://<your-resource-name>.openai.azure.com/"
+openai.api_version = "2024-06-01"
 
 # ------------------ Utility Functions ------------------
+def transcribe_audio(file_path):
+    """Convert audio to text using Azure Whisper."""
+    with open(file_path, "rb") as audio_file:
+        transcript = openai.audio.transcriptions.create(
+            model="whisper-1",   # Azure Whisper deployment
+            file=audio_file
+        )
+    return transcript.text
+
 def summarize_text(text, style="TL;DR"):
-    """Summarize transcript or article text using LLM."""
-    docs = [Document(page_content=text)]
-    llm = ChatOpenAI(model="gpt-4o-mini")
+    """Summarize text using LangChain + Azure GPT."""
+    llm = AzureChatOpenAI(
+        openai_api_version="2024-06-01",
+        azure_deployment="gpt-4o-mini",  # Replace with your Azure GPT deployment
+        temperature=0
+    )
+
     chain = load_summarize_chain(llm, chain_type="map_reduce")
 
-    # Add style formatting
+    # Add style prompt
     if style == "Bullet Points":
-        text = f"Summarize the text into clear bullet points:\n{text}"
+        text = f"Summarize into clear bullet points:\n{text}"
     elif style == "Detailed":
-        text = f"Provide a detailed structured summary with key themes and insights:\n{text}"
-    else:  # Default TL;DR
+        text = f"Provide a detailed structured summary:\n{text}"
+    else:  # TL;DR
         text = f"Give a short 3-4 line TL;DR summary:\n{text}"
 
     docs = [Document(page_content=text)]
     return chain.run(docs)
 
 def summarize_audio(file, style):
-    """Transcribe audio using Whisper and summarize."""
-    whisper_model = whisper.load_model("base")
-    result = whisper_model.transcribe(file)
-    return summarize_text(result["text"], style)
+    """Handle audio upload, transcription, and summarization."""
+    with open("temp_audio.mp3", "wb") as f:
+        f.write(file.getbuffer())
+    transcript = transcribe_audio("temp_audio.mp3")
+    return summarize_text(transcript, style)
 
 def summarize_url(url, style):
-    """Fetch news/article text and summarize."""
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-    paragraphs = " ".join([p.get_text() for p in soup.find_all("p")])
-    return summarize_text(paragraphs, style)
+    """Fetch a news/blog URL and summarize."""
+    loader = UnstructuredURLLoader(urls=[url])
+    docs = loader.load()
+    llm = AzureChatOpenAI(
+        openai_api_version="2024-06-01",
+        azure_deployment="gpt-4o-mini",
+        temperature=0
+    )
+    chain = load_summarize_chain(llm, chain_type="map_reduce")
+    return chain.run(docs)
+
+def summarize_blog(blog_text, style):
+    """Summarize directly pasted blog/article text."""
+    return summarize_text(blog_text, style)
 
 # ------------------ Streamlit UI ------------------
-st.set_page_config(page_title="Media Summarization Agent", layout="wide")
-st.title("🎙️📰 Media Content Summarization Agent")
-st.markdown("Upload audio/video **or** paste a news URL, and get a refined summary instantly.")
+st.set_page_config(page_title="Media, URL & Blog Summarization Agent", layout="wide")
+st.title("🎙️📰✍️ Media, News & Blog Summarization Agent")
+st.markdown("Upload audio/video (Azure Whisper) **or** paste a news/blog URL, **or** paste raw blog text.")
 
-# Input type
-mode = st.radio("Choose input type:", ["Audio/Video File", "News URL"], horizontal=True)
+mode = st.radio(
+    "Choose input type:",
+    ["Audio/Video File", "News/Blog URL", "Paste Blog/Text"],
+    horizontal=True
+)
 
-# Summary style selection
 style = st.selectbox("Select summary style:", ["TL;DR", "Bullet Points", "Detailed"])
 
 if mode == "Audio/Video File":
-    file = st.file_uploader("Upload an audio/video file", type=["mp3", "wav", "mp4"])
+    file = st.file_uploader("Upload audio/video", type=["mp3", "wav", "mp4"])
     if file and st.button("Summarize Audio/Video"):
-        with st.spinner("Transcribing and summarizing... ⏳"):
-            with open("temp_audio.mp3", "wb") as f:
-                f.write(file.getbuffer())
-            summary = summarize_audio("temp_audio.mp3", style)
+        with st.spinner("Processing with Azure Whisper + GPT... ⏳"):
+            summary = summarize_audio(file, style)
         st.subheader("📌 Summary Result")
         st.write(summary)
 
-elif mode == "News URL":
-    url = st.text_input("Enter news article URL:")
+elif mode == "News/Blog URL":
+    url = st.text_input("Enter news or blog article URL:")
     if url and st.button("Summarize URL"):
         with st.spinner("Fetching and summarizing... ⏳"):
             summary = summarize_url(url, style)
         st.subheader("📌 Summary Result")
         st.write(summary)
 
-
----
-
-✨ Improvements in This Version
-
-Radio buttons & dropdowns → Clear selection of input + style.
-
-Loading spinners → User sees progress.
-
-Summary styles → TL;DR, Bullet Points, Detailed.
-
-Wide layout → Better readability.
-
-Formatted outputs → Clean, easy-to-read summaries.
-
+elif mode == "Paste Blog/Text":
+    blog_text = st.text_area("Paste blog/article text here:")
+    if blog_text and st.button("Summarize Blog/Text"):
+        with st.spinner("Summarizing... ⏳"):
+            summary = summarize_blog(blog_text, style)
+        st.subheader("📌 Summary Result")
+        st.write(summary)
 
 
 ---
 
-👉 Do you want me to also add a third mode: “Paste Raw Text” (so users can just paste any transcript/article instead of uploading or URL)?
+✨ Now Supports:
 
-# MCP
+🎙️ Audio/Video upload → Whisper → Summarize
+
+📰 News/Blog URL → Load → Summarize
+
+✍️ Paste Blog/Text → Summarize directly
+
+
+
+---
+
+👉 Do you want me to also add an option for YouTube links (auto extract transcript + summarize)? That would make this a complete media summarizer agent.
+
